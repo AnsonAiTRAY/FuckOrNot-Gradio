@@ -21,6 +21,9 @@ DEFAULT_CONFIG = {
     "supported_formats": [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"]
 }
 
+# API配置文件路径
+API_CONFIG_FILE = os.path.join(os.path.dirname(__file__), "api_config.json")
+
 # 可用的模型列表
 AVAILABLE_MODELS = [
     "gemini-2.5-flash-preview-05-20",
@@ -75,6 +78,63 @@ def get_prompt(mode: str = "简短模式") -> str:
 
         评分：1 = 恶心至极，10 = 立刻想操。
         在简短解释（1-2句）中使用粗俗、性暴露的语言（操、臀部、鸡巴等）。"""
+
+def save_api_key(api_key: str) -> str:
+    """保存API密钥到本地文件"""
+    try:
+        config = {"api_key": api_key}
+        with open(API_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        return "✅ API密钥保存成功"
+    except Exception as e:
+        return f"❌ 保存失败: {str(e)}"
+
+def load_api_key() -> str:
+    """从本地文件加载API密钥"""
+    try:
+        if os.path.exists(API_CONFIG_FILE):
+            print(f"📁 找到API配置文件: {API_CONFIG_FILE}")
+            with open(API_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                api_key = config.get("api_key", "")
+                if api_key:
+                    print(f"✅ 成功加载API密钥 (长度: {len(api_key)})")
+                    return api_key
+                else:
+                    print("⚠️ API配置文件中没有找到api_key字段")
+        else:
+            print(f"📄 API配置文件不存在: {API_CONFIG_FILE}")
+    except Exception as e:
+        print(f"❌ 加载API密钥失败: {e}")
+    return ""
+
+def test_api_key(api_key: str) -> str:
+    """测试API密钥是否有效"""
+    if not api_key or api_key.strip() == "":
+        return "❌ 请输入API密钥"
+    
+    try:
+        # 使用简单的请求测试API
+        base_url = "https://generativelanguage.googleapis.com"
+        test_url = f"{base_url}/v1beta/models?key={api_key}"
+        
+        response = requests.get(test_url, timeout=10)
+        if response.status_code == 200:
+            return "✅ API密钥有效"
+        elif response.status_code == 400:
+            return "❌ API密钥无效"
+        elif response.status_code == 403:
+            return "❌ API密钥权限不足"
+        else:
+            return f"❌ API测试失败: HTTP {response.status_code}"
+    except requests.exceptions.Timeout:
+        return "❌ 请求超时，请检查网络连接"
+    except requests.exceptions.RequestException as e:
+        return f"❌ 网络错误: {str(e)}"
+    except Exception as e:
+        return f"❌ 测试失败: {str(e)}"
+
+
 
 def encode_image(image_path: str) -> Optional[str]:
     """将图片编码为base64"""
@@ -221,8 +281,10 @@ def process_image(image, api_key, model, mode):
         
         if result["success"]:
             verdict_icon = "👍" if result["verdict"] == "上" else "👎"
-            rating_text = f"📊: {result['verdict']} ({result['rating']}/10) {verdict_icon}"
+            verdict_emoji = "😋" if result["verdict"] == "上" else "🤮"
+            rating_text = f"📊: {verdict_emoji} {result['verdict']} ({result['rating']}/10) {verdict_icon}"
             explanation_text = f"💬: {result['explanation']}"
+            
             return image, rating_text, explanation_text
         else:
             return image, f"❌ 错误: {result['error']}", ""
@@ -239,7 +301,7 @@ def process_image(image, api_key, model, mode):
 
 def reset_interface():
     """重置界面"""
-    return None, "", "", DEFAULT_CONFIG["model"], "简短模式"
+    return None, "", "", "", DEFAULT_CONFIG["model"], "简短模式"
 
 def create_interface():
     """创建Gradio界面"""
@@ -248,7 +310,7 @@ def create_interface():
             """
             # 🖼️ 上不上AI评分工具
             
-            **使用说明:
+            **使用说明**:
             1. 输入你的Gemini API密钥 2. 选择模型和评分模式 3. 上传图片 4. 点击"开始评分"按钮
             """
         )
@@ -258,11 +320,34 @@ def create_interface():
                 # 配置区域
                 gr.Markdown("### ⚙️ 配置设置")
                 
+                # 先加载API密钥
+                loaded_api_key = load_api_key()
+                
+                # 显示加载状态
+                if loaded_api_key:
+                    load_status_msg = f"✅ 已自动加载保存的API密钥 (长度: {len(loaded_api_key)})"
+                else:
+                    load_status_msg = "ℹ️ 未找到保存的API密钥，请手动输入"
+                
+                gr.Markdown(f"**加载状态**: {load_status_msg}")
+                
                 api_key_input = gr.Textbox(
                     label="🔑 Gemini API密钥",
-                    placeholder="请输入你的Gemini API密钥",
+                    placeholder="请输入你的Gemini API密钥" if not loaded_api_key else "已加载保存的API密钥",
                     type="password",
+                    value=loaded_api_key,
                     info="获取API密钥: https://aistudio.google.com/app/apikey"
+                )
+                
+                # API密钥操作按钮
+                with gr.Row():
+                    save_api_btn = gr.Button("💾 保存API", size="sm", scale=1)
+                    test_api_btn = gr.Button("🧪 测试API", size="sm", scale=1)
+                
+                api_status = gr.Textbox(
+                    label="API状态",
+                    interactive=False,
+                    visible=False
                 )
                 
                 model_dropdown = gr.Dropdown(
@@ -280,6 +365,8 @@ def create_interface():
                     label="🎯 评分模式",
                     info="选择评分的详细程度"
                 )
+                
+
                 
                 # 操作按钮
                 with gr.Row():
@@ -307,6 +394,8 @@ def create_interface():
                     interactive=False,
                     max_lines=20
                 )
+                
+
         
         # 底部信息
         gr.Markdown(
@@ -348,6 +437,33 @@ def create_interface():
         )
         
         # 绑定事件
+        # API密钥保存按钮
+        def save_and_update_status(api_key):
+            save_result = save_api_key(api_key)
+            return save_result
+        
+        save_api_btn.click(
+            fn=save_and_update_status,
+            inputs=[api_key_input],
+            outputs=[api_status],
+            show_progress=False
+        ).then(
+            lambda: gr.update(visible=True),
+            outputs=[api_status]
+        )
+        
+        # API密钥测试按钮
+        test_api_btn.click(
+            fn=test_api_key,
+            inputs=[api_key_input],
+            outputs=[api_status],
+            show_progress=True
+        ).then(
+            lambda: gr.update(visible=True),
+            outputs=[api_status]
+        )
+        
+        # 主要评分按钮
         submit_btn.click(
             fn=process_image,
             inputs=[image_input, api_key_input, model_dropdown, mode_radio],
@@ -355,18 +471,57 @@ def create_interface():
             show_progress=True
         )
         
+        # 重置按钮
+        def reset_interface():
+            return None, "", "", "gemini-2.5-flash-preview-05-20", "简短模式"
+        
         reset_btn.click(
             fn=reset_interface,
             outputs=[image_input, rating_output, explanation_output, model_dropdown, mode_radio]
+        ).then(
+            lambda: gr.update(visible=False),
+            outputs=[api_status]
         )
     
     return app
 
+def debug_api_config():
+    """调试API配置功能"""
+    print("\n=== API配置调试信息 ===")
+    print(f"当前工作目录: {os.getcwd()}")
+    print(f"API配置文件路径: {API_CONFIG_FILE}")
+    print(f"配置文件是否存在: {os.path.exists(API_CONFIG_FILE)}")
+    
+    if os.path.exists(API_CONFIG_FILE):
+        try:
+            with open(API_CONFIG_FILE, 'r', encoding='utf-8') as f:
+                content = f.read()
+                print(f"文件内容: {repr(content)}")
+                config = json.loads(content)
+                print(f"解析后的配置: {config}")
+                api_key = config.get('api_key', '')
+                print(f"API密钥: {'存在' if api_key else '不存在'} (长度: {len(api_key)})")
+        except Exception as e:
+            print(f"读取配置文件时出错: {e}")
+    print("========================\n")
+
 def main():
     """主函数"""
+    print("🚀 启动Gradio应用...")
+    print("📋 检查API密钥配置...")
+    
+    # 调试API配置
+    debug_api_config()
+    
+    # 检查API密钥加载状态
+    loaded_key = load_api_key()
+    if loaded_key:
+        print(f"✅ 已自动加载保存的API密钥 (长度: {len(loaded_key)})")
+    else:
+        print("ℹ️ 未找到保存的API密钥，请手动输入")
+    
     app = create_interface()
     
-    print("🚀 启动Gradio应用...")
     print("📱 应用将在浏览器中自动打开")
     print("🔗 如果没有自动打开，请访问显示的本地地址")
     

@@ -19,11 +19,11 @@ try:
     if __name__ == "__main__":
         print("🎉 欢迎使用图片AI评分工具 - Gradio版本")
         print("📋 功能特点:")
-        print("   • 🔑 自定义API密钥")
+        print("   • 🔑 API密钥管理（保存/测试）")
         print("   • 🤖 多种AI模型选择")
-        print("   • ⏱️ 可调节超时时间")
         print("   • 🎯 三种评分模式")
         print("   • 📸 图片上传与预览")
+        print("   • 📊 emoji增强的评分显示")
         print("   • 🔄 一键重置功能")
         print("")
         print("🚀 正在启动应用...")
